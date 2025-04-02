@@ -115,8 +115,28 @@ int register_filesystem(struct file_system_type * fs)
 extern int register_filesystem(struct file_system_type *); // 注册文件系统
 extern int unregister_filesystem(struct file_system_type *); 
 ```
-
 注册注销函数，在每个文件系统自身init时使用，
+
+register_filesystem（）函数中find_filesystem()函数，如果已有文件系统则返回busy，如果没有则加入链表返回
+
+ 
+
+前超级块
+ ```c
+ typedef struct SuperBlock {
+  u32 first_data_sec;
+  u32 data_sec_cnt;
+  u32 data_clus_cnt;
+  u32 bytes_per_clus;
+  union {
+    struct bpb bpb;
+    struct ext4_sblock ext4_sblock;
+  };
+} SuperBlock;
+ ```
+
+
+
 
  
 
