@@ -104,6 +104,8 @@ int register_filesystem(struct file_system_type * fs)
 
 ```
 
+
+
 中有个是find_filesystem()函数 ，用来寻找一个空闲的文件系统结构体
 
 
