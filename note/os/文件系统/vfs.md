@@ -142,7 +142,6 @@ quota_write：由 VFS 调用以向文件系统配额文件中写入数据。
 此结构描述了 VFS 如何操作您文件系统中的 inode。自内核 2.6.22 起，定义了以下成员：
 
 ``` c
-
 struct inode_operations {
     int (*create) (struct inode *, struct dentry *, int, struct nameidata *); // create 
     struct dentry * (*lookup) (struct inode *, struct dentry *, struct nameidata *); //  lookup 当 VFS 需要在父目录中查找 inode 时调用。
