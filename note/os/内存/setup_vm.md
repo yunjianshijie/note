@@ -8,8 +8,7 @@
 
 首先目标是：
 1. 开启分页模式：
-2. 为内核自身提供映射：
-3. 为必要的外设和数据提供映射：
+2. 为内核自身提供映射     提供映射：
 
 ##  映射内容
 
@@ -83,6 +82,113 @@ D(Dirty)：处理器记录自从页表项上的这一位被清零之后，页表
 pgd_t early_pg_dir[PTRS_PER_PGD] __initdata __aligned(PAGE_SIZE);
 
 ```
+## kernel_mapping 结构体
+
+用来描述内核代码和内核映射区之间各种偏移和基地址， 在early boot阶段用来完成内核页表映射（create_pgd_mapping 之类的函数会用到它）。
+
+```c
+struct kernel_mapping {
+	unsigned long page_offset;
+	unsigned long virt_addr;
+	unsigned long virt_offset;
+	uintptr_t phys_addr;
+	uintptr_t size;
+	/* Offset between linear mapping virtual address and kernel load address */
+	unsigned long va_pa_offset;
+	/* Offset between kernel mapping virtual address and kernel load address */
+	unsigned long va_kernel_pa_offset;
+	unsigned long va_kernel_xip_pa_offset;
+#ifdef CONFIG_XIP_KERNEL
+	uintptr_t xiprom;
+	uintptr_t xiprom_sz;
+#endif
+};
+```
 
 
+
+* **线性映射区**（Linear Mapping）：物理内存直接映射到一个虚拟地址区域；
+
+* **内核映射区**（Kernel Mapping）：ELF 格式的内核镜像加载地址；
+
+* **XIP**（Execute In Place）：某些平台上支持直接在 ROM 或 Flash 中执行内核代码，不拷贝到 RAM，这时候有额外的偏移量。
+
+
+
+## 操作结构体
+```c
+struct pt_alloc_ops {
+	pte_t *(*get_pte_virt)(phys_addr_t pa);
+	phys_addr_t (*alloc_pte)(uintptr_t va);
+	#ifndef __PAGETABLE_PMD_FOLDED
+	pmd_t *(*get_pmd_virt)(phys_addr_t pa);
+	phys_addr_t (*alloc_pmd)(uintptr_t va);
+	// pud_t *(*get_pud_virt)(phys_addr_t pa);
+	// phys_addr_t (*alloc_pud)(uintptr_t va);
+	// p4d_t *(*get_p4d_virt)(phys_addr_t pa);
+	// phys_addr_t (*alloc_p4d)(uintptr_t va);
+#endif
+};	
+```
+
+
+
+
+## 建立映射函数 create_pgd_mapping
+
+![alt text](image-7.png)
+```c
+void __init create_pgd_mapping(pgd_t *pgdp,
+				      uintptr_t va, phys_addr_t pa,
+				      phys_addr_t sz, pgprot_t prot)
+{
+	pgd_next_t *nextp;
+	phys_addr_t next_phys;
+	uintptr_t pgd_idx = pgd_index(va);
+    //大页映射  不再往下分配二级页表
+	if (sz == PGDIR_SIZE) {
+		if (pgd_val(pgdp[pgd_idx]) == 0)
+            //把物理页号 + 权限打包成一个合法的 PGD 项。
+			pgdp[pgd_idx] = pfn_pgd(PFN_DOWN(pa), prot);
+		return;
+	}
+    //
+	if (pgd_val(pgdp[pgd_idx]) == 0) {
+        // 分配页表项（PUD/PMD）
+		next_phys = alloc_pgd_next(va);
+		// pfn_pgd
+        pgdp[pgd_idx] = pfn_pgd(PFN_DOWN(next_phys), PAGE_TABLE);
+        // 获取用于写入二级页表物理
+		nextp = get_pgd_next_virt(next_phys);
+		memset(nextp, 0, PAGE_SIZE);
+	} else {
+        //如果分配页表项不为空，拿到页表物理地址
+		next_phys = PFN_PHYS(_pgd_pfn(pgdp[pgd_idx]));
+        // 虚拟地址
+        nextp = get_pgd_next_virt(next_phys);
+	}
+    // 拿到
+	create_pgd_next_mapping(nextp, va, pa, sz, prot);
+}
+```
+![create_pgd_mapping流程](image-6.png)
+
+* create_pgd_next_mapping 宏判断建立页表机制（看是有几级页表），发现下一步是建立p4d(5),pud(4),pmd(3)
+
+``` c 
+// 
+#define create_pgd_next_mapping(__nextp, __va, __pa, __sz, __prot)	\
+				(pgtable_l5_enabled ?			\
+		create_p4d_mapping(__nextp, __va, __pa, __sz, __prot) : \
+				(pgtable_l4_enabled ?			\
+		create_pud_mapping((pud_t *)__nextp, __va, __pa, __sz, __prot) :	\
+		create_pmd_mapping((pmd_t *)__nextp, __va, __pa, __sz, __prot)))
+
+// 在Sv39模式下应该是 create_pud_mapping
+```
+
+转换虚拟地址 函数`get_pgd_next_virt`
+```c
+#define get_pgd_next_virt(__pa)	pt_ops.get_cpte_virt(__pa)
+```
 
